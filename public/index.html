@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>국외체험학습 만족도 설문</title>
+<style>
+  :root { --bg:#f4f6fb; --card:#fff; --ink:#1f2937; --sub:#6b7280; --line:#e5e7eb; --accent:#2563eb; --accent-soft:#dbeafe; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Malgun Gothic","Noto Sans KR",sans-serif; line-height:1.55; }
+  .wrap { max-width:720px; margin:0 auto; padding:16px; }
+  header { background:linear-gradient(135deg,#2563eb,#4f46e5); color:#fff; border-radius:16px; padding:24px 20px; margin-bottom:16px; }
+  header h1 { margin:0 0 4px; font-size:1.35rem; }
+  header p { margin:4px 0 0; opacity:.92; font-size:.95rem; }
+  .progress { position:sticky; top:0; z-index:5; background:var(--bg); padding:8px 0; }
+  .bar { height:8px; background:var(--line); border-radius:99px; overflow:hidden; }
+  .bar > i { display:block; height:100%; width:0; background:var(--accent); transition:width .25s; }
+  .count { font-size:.8rem; color:var(--sub); text-align:right; margin-top:4px; }
+  section.card { background:var(--card); border-radius:16px; padding:18px 16px; margin:14px 0; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  section.card h2 { margin:0 0 8px; font-size:1.1rem; color:var(--accent); }
+  .q { padding:14px 0; border-top:1px solid var(--line); }
+  .q.missing { background:#fef2f2; border-radius:8px; padding:14px 8px; }
+  .q p { margin:0 0 10px; font-weight:600; font-size:.97rem; }
+  .opts { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
+  .opts label { position:relative; }
+  .opts input { position:absolute; opacity:0; inset:0; width:100%; height:100%; cursor:pointer; margin:0; }
+  .opts span { display:block; text-align:center; padding:10px 2px; border:1.5px solid var(--line); border-radius:10px; font-size:.78rem; line-height:1.25; background:#fff; }
+  .opts input:checked + span { background:var(--accent-soft); border-color:var(--accent); color:#1e40af; font-weight:700; }
+  .opts input:focus-visible + span { outline:3px solid #93c5fd; }
+  textarea { width:100%; min-height:64px; border:1.5px solid var(--line); border-radius:10px; padding:10px; font:inherit; resize:vertical; margin-top:10px; }
+  .hint { color:var(--sub); font-size:.85rem; }
+  button.submit { width:100%; padding:16px; border:0; border-radius:14px; background:var(--accent); color:#fff; font-size:1.05rem; font-weight:700; cursor:pointer; margin:8px 0 32px; }
+  button.submit:disabled { opacity:.6; }
+  .msg { text-align:center; padding:48px 20px; background:var(--card); border-radius:16px; }
+  .msg h2 { margin:0 0 8px; }
+  .err { color:#b91c1c; text-align:center; margin:8px 0; font-weight:600; }
+  .hp { position:absolute; left:-9999px; }
+  @media (max-width:420px){ .opts span { font-size:.7rem; padding:9px 0; } }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script src="questions.js"></script>
+<script>
+(function () {
+  const S = window.SURVEY;
+  const app = document.getElementById("app");
+  const total = S.sections.reduce((n, s) => n + s.items.length, 0);
+
+  let html = `
+    <header>
+      <h1>${S.title}</h1>
+      <p>${S.school} · ${S.audience}</p>
+      <p>${S.intro}</p>
+    </header>
+    <div class="progress"><div class="bar"><i id="bar"></i></div><div class="count" id="count">0 / ${total}</div></div>
+    <form id="form" novalidate>
+      <input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">`;
+
+  let qn = 0;
+  S.sections.forEach((sec) => {
+    html += `<section class="card"><h2>${sec.title}</h2>`;
+    sec.items.forEach((text, i) => {
+      qn++;
+      const name = `${sec.id}_${i}`;
+      html += `<div class="q" data-name="${name}"><p>${qn}. ${text}</p><div class="opts">` +
+        S.scale.map((o) => `<label><input type="radio" name="${name}" value="${o.value}"><span>${o.label}</span></label>`).join("") +
+        `</div></div>`;
+    });
+    html += `<textarea name="comment_${sec.id}" maxlength="500" placeholder="${sec.title}에 대한 기타 의견 (쓰고 싶을 때만 써 주세요)"></textarea></section>`;
+  });
+
+  html += `
+      <section class="card"><h2>하고 싶은 말</h2>
+        <p class="hint">이번 체험학습에서 좋았던 점이나 아쉬웠던 점을 자유롭게 적어 주세요.</p>
+        <textarea name="comment_free" maxlength="1000"></textarea></section>
+      <div class="err" id="err" role="alert"></div>
+      <button class="submit" id="btn" type="submit">제출하기</button>
+    </form>`;
+  app.innerHTML = html;
+
+  const form = document.getElementById("form");
+  const bar = document.getElementById("bar");
+  const count = document.getElementById("count");
+  const err = document.getElementById("err");
+  const btn = document.getElementById("btn");
+
+  function answered() {
+    return S.sections.reduce((n, sec) => n + sec.items.filter((_, i) => form.querySelector(`input[name="${sec.id}_${i}"]:checked`)).length, 0);
+  }
+  function refresh() {
+    const a = answered();
+    bar.style.width = (a / total * 100) + "%";
+    count.textContent = a + " / " + total;
+  }
+  form.addEventListener("change", (e) => {
+    refresh();
+    const q = e.target.closest(".q");
+    if (q) q.classList.remove("missing");
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    err.textContent = "";
+    const answers = {};
+    let firstMissing = null;
+    S.sections.forEach((sec) => {
+      sec.items.forEach((_, i) => {
+        const name = `${sec.id}_${i}`;
+        const el = form.querySelector(`input[name="${name}"]:checked`);
+        const wrap = form.querySelector(`.q[data-name="${name}"]`);
+        if (!el) { wrap.classList.add("missing"); firstMissing = firstMissing || wrap; }
+        else answers[name] = Number(el.value);
+      });
+    });
+    if (firstMissing) {
+      err.textContent = "아직 답하지 않은 문항이 있어요. 빨간 칸을 확인해 주세요.";
+      firstMissing.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    const comments = {};
+    form.querySelectorAll("textarea").forEach((t) => { if (t.value.trim()) comments[t.name.replace("comment_", "")] = t.value.trim(); });
+
+    btn.disabled = true; btn.textContent = "제출 중...";
+    try {
+      const res = await fetch("/api/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers, comments, website: form.website.value }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "제출에 실패했어요.");
+      app.innerHTML = `<div class="msg"><h2>🎉 설문에 참여해 주셔서 고마워요!</h2><p>소중한 의견은 다음 체험학습을 더 좋게 만드는 데 쓰여요.<br>이제 창을 닫아도 돼요.</p></div>`;
+      window.scrollTo(0, 0);
+    } catch (ex) {
+      err.textContent = ex.message + " 잠시 후 다시 눌러 주세요.";
+      btn.disabled = false; btn.textContent = "제출하기";
+    }
+  });
+})();
+</script>
+</body>
+</html>
