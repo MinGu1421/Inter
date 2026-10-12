@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>설문 결과 (관리자)</title>
+<style>
+  :root { --bg:#f4f6fb; --card:#fff; --ink:#1f2937; --sub:#6b7280; --line:#e5e7eb; --accent:#2563eb; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Malgun Gothic","Noto Sans KR",sans-serif; line-height:1.5; }
+  .wrap { max-width:900px; margin:0 auto; padding:16px; }
+  h1 { font-size:1.3rem; margin:8px 0 4px; }
+  .card { background:var(--card); border-radius:14px; padding:16px; margin:14px 0; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
+  .kpi { background:var(--card); border-radius:14px; padding:14px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  .kpi b { display:block; font-size:1.7rem; color:var(--accent); }
+  .kpi span { color:var(--sub); font-size:.85rem; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th, td { padding:8px 6px; border-bottom:1px solid var(--line); text-align:center; }
+  th:first-child, td:first-child { text-align:left; }
+  td.q { max-width:340px; }
+  .avgbar { display:inline-block; height:8px; background:var(--accent); border-radius:99px; vertical-align:middle; margin-left:6px; }
+  h2 { font-size:1.05rem; margin:0 0 8px; color:var(--accent); }
+  .cmt { border-top:1px solid var(--line); padding:8px 0; font-size:.92rem; white-space:pre-wrap; }
+  .cmt small { color:var(--sub); display:block; }
+  input[type=password] { padding:10px; border:1.5px solid var(--line); border-radius:10px; font:inherit; }
+  button { padding:10px 16px; border:0; border-radius:10px; background:var(--accent); color:#fff; font:inherit; font-weight:700; cursor:pointer; }
+  button.ghost { background:#e5e7eb; color:#111; }
+  .err { color:#b91c1c; font-weight:600; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">설문 결과</h1>
+  <div class="card" id="login">
+    <div class="row">
+      <input type="password" id="key" placeholder="관리자 키" autocomplete="current-password">
+      <button id="go">결과 보기</button>
+      <span class="err" id="err"></span>
+    </div>
+  </div>
+  <div id="out"></div>
+</div>
+<script src="questions.js"></script>
+<script>
+(function () {
+  const S = window.SURVEY;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+  let DATA = null;
+
+  $("go").onclick = load;
+  $("key").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+
+  async function load() {
+    $("err").textContent = "";
+    const key = $("key").value;
+    const res = await fetch("/api/results?key=" + encodeURIComponent(key));
+    if (!res.ok) { $("err").textContent = res.status === 401 ? "키가 올바르지 않아요." : "불러오지 못했어요."; return; }
+    DATA = await res.json();
+    $("login").style.display = "none";
+    render();
+  }
+
+  function render() {
+    const recs = DATA.records;
+    const secStats = S.sections.map((sec) => {
+      const items = sec.items.map((text, i) => {
+        const vals = recs.map((r) => r.answers[`${sec.id}_${i}`]).filter(Boolean);
+        const dist = [5, 4, 3, 2, 1].map((v) => vals.filter((x) => x === v).length);
+        return { text, avg: mean(vals), dist, n: vals.length };
+      });
+      return { sec, items, avg: mean(items.flatMap((it, i) => recs.map((r) => r.answers[`${sec.id}_${i}`]).filter(Boolean))) };
+    });
+    const all = recs.flatMap((r) => Object.values(r.answers));
+    const satisfied = all.length ? all.filter((v) => v >= 4).length / all.length * 100 : 0;
+    const unsat = all.length ? all.filter((v) => v <= 2).length / all.length * 100 : 0;
+
+    let h = `<div class="kpis">
+      <div class="kpi"><b>${recs.length}</b><span>응답 수</span></div>
+      <div class="kpi"><b>${mean(all).toFixed(2)}</b><span>전체 평균 (5점 만점)</span></div>
+      <div class="kpi"><b>${satisfied.toFixed(1)}%</b><span>만족 이상 비율</span></div>
+      <div class="kpi"><b>${unsat.toFixed(1)}%</b><span>불만 이하 비율</span></div></div>
+      <div class="card row"><button id="csv">CSV 다운로드 (엑셀용)</button><button class="ghost" id="print">인쇄 / PDF 저장</button></div>
+      <div class="card"><h2>영역별 평균</h2><table><tr><th>영역</th><th>평균</th></tr>` +
+      secStats.map((s) => `<tr><td>${esc(s.sec.title)}</td><td>${s.avg.toFixed(2)}<span class="avgbar" style="width:${s.avg / 5 * 100}px"></span></td></tr>`).join("") +
+      `</table></div>`;
+
+    secStats.forEach((s) => {
+      h += `<div class="card"><h2>${esc(s.sec.title)} (평균 ${s.avg.toFixed(2)})</h2><table>
+        <tr><th>문항</th><th>평균</th><th>매우만족</th><th>만족</th><th>보통</th><th>불만</th><th>매우불만</th></tr>` +
+        s.items.map((it) => `<tr><td class="q">${esc(it.text)}</td><td><b>${it.avg.toFixed(2)}</b></td>${it.dist.map((d) => `<td>${d}</td>`).join("")}</tr>`).join("") +
+        `</table>`;
+      const cm = recs.filter((r) => r.comments && r.comments[s.sec.id]);
+      if (cm.length) h += cm.map((r) => `<div class="cmt">${esc(r.comments[s.sec.id])}</div>`).join("");
+      h += `</div>`;
+    });
+
+    const free = recs.filter((r) => r.comments && r.comments.free);
+    h += `<div class="card"><h2>하고 싶은 말 (${free.length}건)</h2>` + (free.map((r) => `<div class="cmt">${esc(r.comments.free)}</div>`).join("") || "<p>없음</p>") + `</div>`;
+    $("out").innerHTML = h;
+    $("csv").onclick = csv;
+    $("print").onclick = () => window.print();
+  }
+
+  function csv() {
+    const cols = [];
+    S.sections.forEach((sec) => sec.items.forEach((t, i) => cols.push({ key: `${sec.id}_${i}`, label: `[${sec.title}] ${t}` })));
+    const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const head = ["번호", "제출시각", ...cols.map((c) => c.label), ...S.sections.map((s) => `기타의견-${s.title}`), "하고싶은말"];
+    const rows = DATA.records.map((r, n) => [n + 1, r.submittedAt, ...cols.map((c) => r.answers[c.key]), ...S.sections.map((s) => r.comments?.[s.id] || ""), r.comments?.free || ""]);
+    const text = "\ufeff" + [head, ...rows].map((r) => r.map(q).join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
+    a.download = "수학여행_만족도_응답.csv";
+    a.click();
+  }
+})();
+</script>
+</body>
+</html>
